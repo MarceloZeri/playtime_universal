@@ -11,4 +11,6 @@ Supported operations:
 ## Getting Started
 [Download the latest version of Python](https://www.python.org/downloads/) for your operating system, connect your OnionUI SD card to your computer, and run `python3 playtime.py`.
 
-NOTE: For now only Windows is supported. Support for macOS and Linux is coming soon.
+NOTE: I modified the original script to make it work under Windows, Linux or MacOS.
+
+I tested it with my SDCARD on MacOS and the script correctly identified the card, merged two entries and deleted an entry from the records.
