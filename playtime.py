@@ -19,40 +19,71 @@ def clear_screen():
     else:
         print("Screen clearing not supported for this operating system.")
 
-# OS check (temporary until Linux/macOS support is added)
-if platform == "linux" or platform == "linux2":
-    print("Linux is not currently supported. Sorry about that!")
-    sys.exit()
-elif platform == "darwin":
-    print("macOS is not currently supported. Sorry about that!")
-    sys.exit()
-    
-# Ask for the SD card drive letter, back up the database, and try to connect to it
+def get_sdcard_root():
+    """Return a platform-appropriate SD card root path.
+
+    - On Windows the user may enter a drive letter (e.g. E or E:).
+    - On macOS/Linux the script will list /Volumes and let the user choose or enter a path.
+    """
+    if platform.startswith("win"):
+        sdcard = input("Enter SD card drive letter (e.g. E): ").strip().rstrip(':\\/')
+        if not sdcard:
+            print("No SD card provided. Exiting.")
+            sys.exit()
+        return sdcard + ':'
+    else:
+        vols = []
+        try:
+            vols = [d for d in os.listdir('/Volumes') if os.path.isdir(os.path.join('/Volumes', d))]
+        except Exception:
+            vols = []
+
+        if vols:
+            print("Available volumes:")
+            for i, v in enumerate(vols, 1):
+                print(f"{i}. {v}")
+            choice = input("Choose SD card by number or enter full path: ").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(vols):
+                return os.path.join('/Volumes', vols[int(choice) - 1])
+            elif choice:
+                return choice
+            else:
+                print("No SD card selected. Exiting.")
+                sys.exit()
+        else:
+            path = input("Enter SD card mount path (e.g. /Volumes/SDCARD): ").strip()
+            if not path:
+                print("No SD card provided. Exiting.")
+                sys.exit()
+            return path
+
+# Ask for the SD card path, back up the database, and try to connect to it
 clear_screen()
 print_header()
-sdcard = input("Enter SD card drive letter: ")
-dbfile = sdcard+":\Saves\CurrentProfile\play_activity\play_activity_db.sqlite"
+sdcard = get_sdcard_root()
+dbfile = os.path.normpath(os.path.join(sdcard, 'Saves', 'CurrentProfile', 'play_activity', 'play_activity_db.sqlite'))
 if os.path.isfile(dbfile):
     clear_screen()
     print_header()
     print("The play activity database is found!")
     try:
-        shutil.copy(dbfile, sdcard+":\Saves\CurrentProfile\play_activity\play_activity_db.sqlite.bak")
-    except:
+        backup_path = os.path.normpath(os.path.join(sdcard, 'Saves', 'CurrentProfile', 'play_activity', 'play_activity_db.sqlite.bak'))
+        shutil.copy(dbfile, backup_path)
+    except Exception:
         print("An exception occurred creating a backup. There may be permissions issues with the SD card.")
         input("Press Enter to exit...")
         sys.exit()
     
     try:
-        conn=sqlite3.connect(dbfile)
-    except:
+        conn = sqlite3.connect(dbfile)
+    except Exception:
         print("An exception occurred connecting to the database. There may be permissions issues with the SD card.")
         input("Press Enter to exit...")
         sys.exit()
     
-    print("A backup was created: "+sdcard+":\Saves\CurrentProfile\play_activity\play_activity_db.sqlite.bak\n")
+    print(f"A backup was created: {backup_path}\n")
     input("Press Enter to continue...")
-    c=conn.cursor()
+    c = conn.cursor()
 else:
     print("The play activity database was not found! Exiting...")
     sys.exit()
@@ -72,8 +103,13 @@ def merge_entries():
     
     answer = input("\nConfirm merging entries for "+src_game_name+" into "+dest_game_name+"? (y/n): ")
     if answer.lower() in ["y","yes"]:
-        c.execute("UPDATE play_activity SET rom_id = "+dest_game_id+" WHERE rom_id = "+src_game_id)
-        conn.commit()
+        try:
+            c.execute("UPDATE play_activity SET rom_id = ? WHERE rom_id = ?", (dest_game_id, src_game_id))
+            conn.commit()
+        except Exception as e:
+            print(f"Error merging entries: {e}")
+            input("Press Enter to return to menu...")
+            return
         
         clear_screen()
         print_header()
@@ -122,11 +158,19 @@ def del_entries():
     del_choice = 0
     
     if del_mode == 1:
-        del_choice = input("Enter second count for deletion threshold: ")
-        c.execute("SELECT * FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING SUM(play_time) < "+str(del_choice)+")")
+        try:
+            del_choice_int = int(input("Enter deletion playtime threshold (seconds): "))
+        except ValueError:
+            print("Invalid number - returning to menu")
+            return
+        c.execute("SELECT * FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING SUM(play_time) < ?)", (del_choice_int,))
     elif del_mode == 2:
-        del_choice = input("Enter play count for deletion threshold: ")
-        c.execute("SELECT * FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING COUNT(*) <= "+str(del_choice)+")")
+        try:
+            del_choice_int = int(input("Enter play count threshold: "))
+        except ValueError:
+            print("Invalid number - returning to menu")
+            return
+        c.execute("SELECT * FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING COUNT(*) <= ?)", (del_choice_int,))
     elif del_mode == 3:
         c.execute('SELECT name FROM rom')
 
@@ -137,7 +181,7 @@ def del_entries():
             count = count+1
     
         del_choice = input("\nEnter the ID of the game to delete: ")
-        c.execute("SELECT * FROM play_activity WHERE rom_id = "+del_choice)
+        c.execute("SELECT * FROM play_activity WHERE rom_id = ?", (del_choice,))
 
     del_rows = c.fetchall()
     result_dict = {}
@@ -165,11 +209,11 @@ def del_entries():
     answer = input("\nContinue? (y/n): ")
     if answer.lower() in ["y","yes"]:
         if del_mode == 1:
-            c.execute("DELETE FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING SUM(play_time) < "+str(del_choice)+")")
+            c.execute("DELETE FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING SUM(play_time) < ?)", (del_choice_int,))
         elif del_mode == 2:
-            c.execute("DELETE FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING COUNT(*) <= "+str(del_choice)+")")
+            c.execute("DELETE FROM play_activity WHERE rom_id IN ( SELECT rom_id FROM play_activity GROUP BY rom_id HAVING COUNT(*) <= ?)", (del_choice_int,))
         elif del_mode == 3:
-            c.execute("DELETE FROM play_activity WHERE rom_id = "+del_choice)
+            c.execute("DELETE FROM play_activity WHERE rom_id = ?", (del_choice,))
         conn.commit()
         
         clear_screen()
@@ -214,4 +258,4 @@ while True:
         print("Closing database connection and exiting...")
         break
     else:
-        print("Invalid choice.")        
+        print("Invalid choice.")
